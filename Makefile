@@ -53,7 +53,12 @@ lint:
 	pylint jetvoice
 
 test:
-	pytest tests
+	docker run --rm \
+		--env-file $(ENV_FILE) \
+		-v $$(pwd):/app \
+		$(IMAGE_NAME) \
+		pytest -vv tests
+
 
 # Down -> Build -> Up -> Logs
 dbul: down build up logs
