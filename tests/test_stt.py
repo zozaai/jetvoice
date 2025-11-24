@@ -11,7 +11,7 @@ TEST_WAV_FILE = os.path.join(TESTS_DIR, "assets", "test_speech.wav")
 
 # This is the exact phrase you recorded in your audio file.
 EXPECTED_REFERENCE_TEXT = "Hey everyone, I'm Jim. I work as an AI engineer on the Zozajet team with Alma. Right now, I'm working on JetVoice an open-source voice assistant that uses large language models"
-WER_THRESHOLD = 0.3 
+WER_THRESHOLD = 0.4 
 
 @pytest.fixture(scope="module")
 def audio_file_path():

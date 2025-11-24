@@ -6,12 +6,13 @@ import json
 import time
 import wave
 
+
 # Path to the Vosk speech recognition model (configurable)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 VOSK_MODEL = os.getenv("VOSK_MODEL", "vosk-model-small-en-us-0.15")
 MODEL_PATH = os.path.join(BASE_DIR, "models", VOSK_MODEL)
 AUDIO_DEVICE = os.getenv("AUDIO_DEVICE", None)
-SAMPLE_RATE = os.getenv("SAMPLE_RATE", 16000)
+SAMPLE_RATE = int(os.getenv("SAMPLE_RATE", 16000))
 
 # Load Vosk model once
 try:
@@ -31,14 +32,51 @@ q = queue.Queue()
 def callback(indata, frames, time, status):
     q.put(bytes(indata))
 
+
+def transcribe_bytes(audio_bytes: bytes, sample_rate: int = SAMPLE_RATE) -> str:
+    """
+    Transcribes a chunk of raw PCM16 mono audio bytes using the already loaded Vosk model.
+
+    Args:
+        audio_bytes: Raw 16-bit PCM mono audio bytes.
+        sample_rate: Sample rate of the audio (Hz), must match how it was recorded.
+
+    Returns:
+        Transcribed text (may be empty string if nothing recognized).
+    """
+    try:
+        if not audio_bytes:
+            return ""
+
+        recognizer = vosk.KaldiRecognizer(model, sample_rate)
+
+        # Feed audio to recognizer in chunks
+        chunk_size = 4000  # bytes per chunk; doesn't need to match exactly anything
+        offset = 0
+        length = len(audio_bytes)
+
+        while offset < length:
+            chunk = audio_bytes[offset:offset + chunk_size]
+            offset += chunk_size
+            recognizer.AcceptWaveform(chunk)
+
+        result = json.loads(recognizer.FinalResult())
+        return result.get("text", "").strip()
+
+    except Exception as e:
+        print(f"[STT Bytes Error]: {e}")
+        return ""
+
+
 # Main transcription function
-def transcribe(timeout=10, silence_timeout=3):
+def transcribe(timeout=100, silence_timeout=3):
     """
     Transcribe speech with timeout and silence detection
     """
     try:
+        print(sd.query_devices())
         with sd.RawInputStream(samplerate=SAMPLE_RATE, blocksize=8000, dtype='int16', 
-                               channels=1, device=AUDIO_DEVICE, callback=callback):
+                               channels=1, device=5, callback=callback):
             recognizer = vosk.KaldiRecognizer(model, SAMPLE_RATE)
             print("🎤 Listening... (speak now)")
 
@@ -55,7 +93,11 @@ def transcribe(timeout=10, silence_timeout=3):
                     break
                 
                 # Check silence timeout after speech detected
-                if last_speech_time and (current_time - last_speech_time > silence_timeout):
+                print("last_speech_time", last_speech_time)
+                if last_speech_time:
+                    silence_time = current_time - last_speech_time
+                    print("silence_time", silence_time)
+                if last_speech_time and (silence_time > silence_timeout):
                     print("🔇 Silence detected, processing...")
                     break
                 
