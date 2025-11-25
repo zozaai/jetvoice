@@ -32,6 +32,7 @@ down:
 # Run container in background with volume mount (edit code live)
 up:
 	docker run -d \
+		-t \
 		--env-file $(ENV_FILE) \
 		--device /dev/snd \
 		--privileged \

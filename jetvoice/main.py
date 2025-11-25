@@ -1,5 +1,3 @@
-# jetvoice/main.py
-
 import os
 import sys
 import queue
@@ -9,7 +7,7 @@ from loguru import logger
 
 from jetvoice.vad.vad import WebRTCVAD
 from jetvoice.stt.stt import transcribe_bytes
-from jetvoice.llm.llm import JetVoiceLLM  # <--- [1] Import Added
+from jetvoice.llm.llm import JetVoiceLLM
 
 
 def main():
@@ -49,7 +47,6 @@ def main():
         aggressiveness=aggressiveness,
     )
     
-    # <--- [2] Initialize LLM
     llm = JetVoiceLLM()
 
     audio_device = int(os.getenv("AUDIO_DEVICE", "0"))
@@ -57,20 +54,18 @@ def main():
 
     def audio_callback(indata, frames, time_info, status):
         if status:
-            logger.warning(f"Audio callback status: {status}")
+            pass 
         audio_queue.put(bytes(indata))
 
     blocksize = int(sample_rate * frame_duration_ms / 1000)
 
     # ------- State -------
-    state = "listening"
     in_speech = False
     speech_streak = 0
     silence_streak = 0
 
     buffer = b""
     frame_bytes = vad.frame_size_bytes
-
     current_segment = bytearray()
 
     logger.info("[STATE] listening (no voice, waiting for activity)")
@@ -85,7 +80,6 @@ def main():
             device=audio_device,
         ):
             while True:
-
                 chunk = audio_queue.get()
                 buffer += chunk
 
@@ -101,14 +95,9 @@ def main():
                         speech_streak += 1
                         silence_streak = 0
 
-                        # Enter capturing state
+                        # --- TRANSITION: LISTENING -> CAPTURING ---
                         if not in_speech and speech_streak >= n_streak:
                             in_speech = True
-                            state = "capturing"
-                            logger.info("Start capturing ...")
-
-                        # While capturing, show ongoing activity
-                        if state == "capturing":
                             logger.info("Capturing ...")
 
                     else:
@@ -116,14 +105,13 @@ def main():
                         if in_speech:
                             silence_streak += 1
                             speech_streak = 0
-
                             current_segment.extend(frame)
 
+                            # --- TRANSITION: CAPTURING -> TRANSCRIBING ---
                             if silence_streak >= n_silence:
-                                # End capture → Transcribe
                                 in_speech = False
-                                state = "transcribing"
-                                logger.info("[STATE] transcribing (voice ended, processing segment...)")
+                                
+                                logger.info("[STATE] transcribing...")
 
                                 audio_bytes = bytes(current_segment)
                                 current_segment.clear()
@@ -133,27 +121,25 @@ def main():
                                 if audio_bytes:
                                     text = transcribe_bytes(audio_bytes, sample_rate=sample_rate)
                                     if text:
-                                        print(f"\n[Transcript] {text}\n")
+                                        # Removed trailing \n
+                                        print(f"\n[Transcript] {text}")
                                         
-                                        # <--- [3] Call LLM
                                         logger.info("Querying LLM...")
                                         response = llm.ask(text)
                                         
                                         if response:
-                                            print(f"\n[AI] {response}\n")
+                                            # Removed leading and trailing \n
+                                            print(f"[AI] {response}")
                                         else:
                                             logger.warning("LLM returned no response.")
-                                            
                                     else:
-                                        print("\n[Transcript] (no text recognized)\n")
+                                        print("\n[Transcript] (no text recognized)")
 
-                                state = "listening"
-                                logger.info("[STATE] listening (ready for next voice segment)")
+                                logger.info("[STATE] listening")
 
                         else:
-                            # Still silent, not in a speech segment → do nothing
+                            # Still silent, not in a speech segment
                             speech_streak = 0
-                            # logger.info("Listening ...")
 
     except KeyboardInterrupt:
         logger.info("Gracefully shutting down VAD + STT loop.")
