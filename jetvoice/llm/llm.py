@@ -1,49 +1,77 @@
 import openai
 from dotenv import load_dotenv
 import os
+import sys
 
-load_dotenv()
-api_key = os.getenv("OPENAI_API_KEY")
-openai.api_key = api_key
+class JetVoiceLLM:
+    def __init__(self, system_prompt: str = None, model: str = "gpt-5.1"):
+        load_dotenv()
+        self.api_key = os.getenv("OPENAI_API_KEY")
+        self.model = model
+        
+        # Default system prompt if none provided
+        self.system_prompt = system_prompt or (
+            "You are a helpful voice assistant running on Jetson Nano. "
+            "Keep responses brief, conversational, and natural."
+        )
 
-def simple_fallback_response(prompt):
-    """Simple fallback when OpenAI API is not available"""
-    prompt_lower = prompt.lower()
-    
-    if "hello" in prompt_lower or "hi" in prompt_lower:
-        return "Hello! I'm your JetVoice assistant running on Jetson Nano. How can I help you?"
-    elif "how are you" in prompt_lower:
-        return "I'm running well on your Jetson Nano! How are you?"
-    elif "what" in prompt_lower and "time" in prompt_lower:
-        return "I don't have access to current time right now."
-    elif "weather" in prompt_lower:
-        return "I don't have access to weather data at the moment."
-    elif "help" in prompt_lower:
-        return "I'm JetVoice, your AI assistant running on Jetson Nano. I can chat with you and respond to your voice commands."
-    elif "test" in prompt_lower:
-        return "Test successful! Your JetVoice system is working perfectly on Jetson Nano."
-    else:
-        return f"I heard you say: '{prompt}'. I'm your voice assistant running locally on Jetson Nano!"
+        # Configure OpenAI
+        if self.api_key:
+            openai.api_key = self.api_key
 
-def ask_llm(prompt):
-    """Main LLM function for Jetson Nano voice assistant"""
-    
-    # Try OpenAI if we have a real API key
-    if api_key and api_key != "your_api_key_here":
+    def ask(self, user_prompt: str) -> str | None:
+        """
+        Sends a prompt to the LLM and returns the response string.
+        """
+        if not self.api_key or self.api_key == "your_api_key_here":
+            print("[LLM Warning] Invalid or missing OPENAI_API_KEY")
+            return None
+
         try:
-            # Use getattr to avoid linter error, but this works for openai==0.28.1
+            # Using getattr to support openai==0.28.1 structure safely
             chat_completion = getattr(openai, "ChatCompletion")
+            
             response = chat_completion.create(
-                model="gpt-3.5-turbo",
+                model=self.model,
                 messages=[
-                    {"role": "system", "content": "You are a helpful voice assistant running on Jetson Nano. Keep responses brief and natural."},
-                    {"role": "user", "content": prompt}
+                    {"role": "system", "content": self.system_prompt},
+                    {"role": "user", "content": user_prompt}
                 ]
             )
-            return response.choices[0].message["content"].strip()
+            
+            content = response.choices[0].message["content"].strip()
+            return content
+
         except Exception as e:
             print(f"[OpenAI Error]: {str(e)}")
-            print("[LLM] Using local fallback...")
+            return None
+
+if __name__ == "__main__":
+    # This block runs when you execute: python -m jetvoice.llm.llm "Your prompt"
     
-    # Use simple local fallback
-    return simple_fallback_response(prompt)
+    # 1. Get prompt from CLI args or default
+    if len(sys.argv) > 1:
+        prompt = " ".join(sys.argv[1:])
+    else:
+        prompt = "Hello, introduce yourself briefly."
+
+    print(f"--- Testing JetVoiceLLM ---")
+    print(f"Input Prompt: '{prompt}'")
+
+    # 2. Instantiate
+    llm = JetVoiceLLM()
+
+    # 3. Check Key (Masked for security)
+    if llm.api_key and len(llm.api_key) > 10:
+        masked_key = llm.api_key[:6] + "..." + llm.api_key[-4:]
+        print(f"API Key found: {masked_key}")
+    else:
+        print("!! WARNING: API Key appears missing or default !!")
+
+    # 4. Run
+    print("Sending request to OpenAI...")
+    response = llm.ask(prompt)
+    
+    print("-" * 30)
+    print(f"Response:\n{response}")
+    print("-" * 30)

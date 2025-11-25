@@ -1,1 +1,1 @@
-from .llm import ask_llm
+from .llm import JetVoiceLLM

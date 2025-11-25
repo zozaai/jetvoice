@@ -9,18 +9,12 @@ from loguru import logger
 
 from jetvoice.vad.vad import WebRTCVAD
 from jetvoice.stt.stt import transcribe_bytes
+from jetvoice.llm.llm import JetVoiceLLM  # <--- [1] Import Added
 
 
 def main():
     """
-    Main loop:
-
-    - VAD is always listening.
-    - When voice is detected, we start capturing audio frames ("capturing" state).
-    - While capturing: print "Capturing ..."
-    - On first detection: print "Start capturing ..."
-    - When enough trailing silence is seen, we stop capturing, transcribe the
-      segment ("transcribing" state), print the text, and go back to "listening".
+    Main loop: VAD -> STT -> LLM -> Loop
     """
 
     # ------- Logging -------
@@ -33,7 +27,7 @@ def main():
                "<level>{message}</level>"
     )
 
-    logger.info("Starting JetVoice VAD + STT loop...")
+    logger.info("Starting JetVoice VAD + STT + LLM loop...")
 
     # ------- Config -------
     sample_rate = int(os.getenv("SAMPLE_RATE", "16000"))
@@ -48,12 +42,15 @@ def main():
         f"aggressiveness={aggressiveness}, n_streak={n_streak}, n_silence={n_silence}"
     )
 
-    # ------- VAD -------
+    # ------- VAD & LLM Init -------
     vad = WebRTCVAD(
         sample_rate=sample_rate,
         frame_duration_ms=frame_duration_ms,
         aggressiveness=aggressiveness,
     )
+    
+    # <--- [2] Initialize LLM
+    llm = JetVoiceLLM()
 
     audio_device = int(os.getenv("AUDIO_DEVICE", "0"))
     audio_queue: "queue.Queue[bytes]" = queue.Queue()
@@ -137,6 +134,16 @@ def main():
                                     text = transcribe_bytes(audio_bytes, sample_rate=sample_rate)
                                     if text:
                                         print(f"\n[Transcript] {text}\n")
+                                        
+                                        # <--- [3] Call LLM
+                                        logger.info("Querying LLM...")
+                                        response = llm.ask(text)
+                                        
+                                        if response:
+                                            print(f"\n[AI] {response}\n")
+                                        else:
+                                            logger.warning("LLM returned no response.")
+                                            
                                     else:
                                         print("\n[Transcript] (no text recognized)\n")
 
