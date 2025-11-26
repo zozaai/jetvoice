@@ -1,67 +1,108 @@
 import pyttsx3
 import os
+import subprocess
+import sys
 
-def speak(text):
-    try:
-        engine = pyttsx3.init()
+class JetVoiceTTS:
+    def __init__(self):
+        """
+        Initializes the TTS engine once to avoid the overhead and instability
+        of repeated initialization.
+        """
+        self.engine = None
         
-        # Get available voices
-        voices = engine.getProperty('voices')
-        
-        # Check for user-specified voice first
-        user_voice = os.getenv("TTS_VOICE_ID")
-        selected_voice = None
-        
-        if user_voice:
-            # Try to find exact user-specified voice
-            for voice in voices:
-                if user_voice == voice.id:
-                    selected_voice = voice.id
-                    break
-        
-        # If no user voice or not found, use default preferences
-        if not selected_voice:
-            voice_preference = [
-                'english-us',      # American English
-                'english_rp',      # British English (RP)
-                'english',         # Standard English
-                'default'          # Fallback
-            ]
-            
-            # Try to find and set preferred voice
-            for preferred in voice_preference:
+        try:
+            # Initialize the engine
+            self.engine = pyttsx3.init()
+            self._configure_engine()
+        except Exception as e:
+            print(f"[TTS Init Error]: Could not initialize pyttsx3: {e}")
+            print("[TTS] Switching to fallback (espeak subprocess) mode.")
+            self.engine = None
+
+    def _configure_engine(self):
+        """
+        Sets voice, rate, and volume based on environment variables or defaults.
+        """
+        if not self.engine:
+            return
+
+        # 1. Voice Selection
+        try:
+            voices = self.engine.getProperty('voices')
+            user_voice = os.getenv("TTS_VOICE_ID")
+            selected_voice = None
+
+            # A. Try user-specified ID
+            if user_voice:
                 for voice in voices:
-                    if preferred in voice.id.lower():
+                    if user_voice == voice.id:
                         selected_voice = voice.id
                         break
-                if selected_voice:
-                    break
-        
-        if selected_voice:
-            engine.setProperty('voice', selected_voice)
-            print(f"[TTS] Using voice: {selected_voice}")
-        
-        # Set speech rate (words per minute) - default is usually 200
-        # Lower = slower and clearer, Higher = faster
-        rate = int(os.getenv("TTS_RATE", "150"))  # Slower for clarity
-        engine.setProperty('rate', rate)
-        
-        # Set volume (0.0 to 1.0)
-        volume = float(os.getenv("TTS_VOLUME", "0.9"))
-        engine.setProperty('volume', volume)
-        
-        print(f"[TTS] Speaking: '{text}' (rate: {rate}, volume: {volume})")
-        
-        engine.say(text)
-        engine.runAndWait()
-        
-    except Exception as e:
-        print(f"[TTS Error]: {e}")
-        # Fallback to simple espeak command
+            
+            # B. Try preferences (US/English)
+            if not selected_voice:
+                voice_preference = ['english-us', 'english_rp', 'english', 'default']
+                for preferred in voice_preference:
+                    for voice in voices:
+                        if preferred in voice.id.lower():
+                            selected_voice = voice.id
+                            break
+                    if selected_voice:
+                        break
+
+            if selected_voice:
+                self.engine.setProperty('voice', selected_voice)
+                # print(f"[TTS] Configured voice: {selected_voice}")
+
+        except Exception as e:
+            print(f"[TTS Config Warning] Failed to set voice: {e}")
+
+        # 2. Rate and Volume
         try:
-            import subprocess
-            subprocess.run(['espeak', '-s', '150', '-v', 'en-us', text], 
-                         capture_output=True, check=True)
-            print("[TTS] Using espeak fallback")
-        except Exception as fallback_error:
-            print(f"[TTS Fallback Error]: {fallback_error}")
+            rate = int(os.getenv("TTS_RATE", "150"))
+            self.engine.setProperty('rate', rate)
+
+            volume = float(os.getenv("TTS_VOLUME", "0.9"))
+            self.engine.setProperty('volume', volume)
+        except Exception as e:
+            print(f"[TTS Config Warning] Failed to set rate/volume: {e}")
+
+    def speak(self, text: str):
+        """
+        Speaks the provided text. Uses fallback if the main engine fails.
+        """
+        if not text:
+            return
+
+        print(f"[TTS] Speaking: '{text}'")
+
+        if self.engine:
+            try:
+                self.engine.say(text)
+                self.engine.runAndWait()
+            except Exception as e:
+                print(f"[TTS Runtime Error]: {e}")
+                self._fallback_speak(text)
+        else:
+            self._fallback_speak(text)
+
+    def _fallback_speak(self, text: str):
+        """
+        Fallback mechanism using direct subprocess call to espeak.
+        Useful for Docker environments where pyttsx3 drivers might flake out.
+        """
+        try:
+            subprocess.run(
+                ['espeak', '-s', '150', '-v', 'en-us', text], 
+                capture_output=True, 
+                check=True
+            )
+        except Exception as e:
+            print(f"[TTS Fallback Error]: espeak failed: {e}")
+
+# Create a singleton instance for easy import if needed, 
+# though instantiating in main.py is cleaner.
+if __name__ == "__main__":
+    tts = JetVoiceTTS()
+    tts.speak("System initialized.")

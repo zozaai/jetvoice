@@ -1,1 +1,1 @@
-from .tts import speak
+from .tts import JetVoiceTTS
