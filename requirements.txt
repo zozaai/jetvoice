@@ -10,3 +10,4 @@ watchfiles==1.1.0
 webrtcvad==2.0.10
 pytest==9.0.1
 jiwer==4.0.0
+gTTS==2.5.1

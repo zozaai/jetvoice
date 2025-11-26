@@ -1,108 +1,120 @@
 import pyttsx3
 import os
 import subprocess
-import sys
+from gtts import gTTS
 
 class JetVoiceTTS:
     def __init__(self):
         """
-        Initializes the TTS engine once to avoid the overhead and instability
-        of repeated initialization.
+        Initializes the TTS engine.
         """
         self.engine = None
+        self.use_online = os.getenv("TTS_ONLINE", "false").lower() == "true"
         
-        try:
-            # Initialize the engine
-            self.engine = pyttsx3.init()
-            self._configure_engine()
-        except Exception as e:
-            print(f"[TTS Init Error]: Could not initialize pyttsx3: {e}")
-            print("[TTS] Switching to fallback (espeak subprocess) mode.")
-            self.engine = None
+        # Only init pyttsx3 if we are NOT using online TTS (or as backup)
+        if not self.use_online:
+            try:
+                self.engine = pyttsx3.init()
+                self._configure_engine()
+            except Exception as e:
+                print(f"[TTS] Offline engine init failed: {e}")
 
     def _configure_engine(self):
         """
-        Sets voice, rate, and volume based on environment variables or defaults.
+        Configures the offline engine properties.
         """
-        if not self.engine:
+        if not self.engine: 
             return
-
-        # 1. Voice Selection
+        
+        # 1. Rate (Slower = Less Robotic)
+        # Defaulting to 125 makes espeak much clearer
         try:
-            voices = self.engine.getProperty('voices')
-            user_voice = os.getenv("TTS_VOICE_ID")
-            selected_voice = None
-
-            # A. Try user-specified ID
-            if user_voice:
-                for voice in voices:
-                    if user_voice == voice.id:
-                        selected_voice = voice.id
-                        break
-            
-            # B. Try preferences (US/English)
-            if not selected_voice:
-                voice_preference = ['english-us', 'english_rp', 'english', 'default']
-                for preferred in voice_preference:
-                    for voice in voices:
-                        if preferred in voice.id.lower():
-                            selected_voice = voice.id
-                            break
-                    if selected_voice:
-                        break
-
-            if selected_voice:
-                self.engine.setProperty('voice', selected_voice)
-                # print(f"[TTS] Configured voice: {selected_voice}")
-
-        except Exception as e:
-            print(f"[TTS Config Warning] Failed to set voice: {e}")
-
-        # 2. Rate and Volume
-        try:
-            rate = int(os.getenv("TTS_RATE", "150"))
+            rate = int(os.getenv("TTS_RATE", "125")) 
             self.engine.setProperty('rate', rate)
+        except Exception:
+            pass
 
-            volume = float(os.getenv("TTS_VOLUME", "0.9"))
+        # 2. Volume
+        try:
+            volume = float(os.getenv("TTS_VOLUME", "1.0"))
             self.engine.setProperty('volume', volume)
-        except Exception as e:
-            print(f"[TTS Config Warning] Failed to set rate/volume: {e}")
+        except Exception:
+            pass
+
+        # 3. Voice (Prefer US English)
+        try:
+            self.engine.setProperty('voice', 'english-us')
+        except Exception:
+            pass
 
     def speak(self, text: str):
         """
-        Speaks the provided text. Uses fallback if the main engine fails.
+        Speaks the provided text.
         """
-        if not text:
+        if not text: 
             return
 
         print(f"[TTS] Speaking: '{text}'")
 
+        if self.use_online:
+            self._speak_online(text)
+        else:
+            self._speak_offline(text)
+
+    def _speak_online(self, text: str):
+        """
+        Uses Google TTS (Natural voice). Requires Internet and mpg123.
+        """
+        try:
+            # Generate MP3
+            tts = gTTS(text, lang='en', tld='us')
+            filepath = "/tmp/jetvoice_output.mp3"
+            tts.save(filepath)
+            
+            # Play MP3 using mpg123
+            subprocess.run(
+                ['mpg123', '-q', filepath], 
+                check=True
+            )
+        except Exception as e:
+            print(f"[TTS] Online failed ({e}). Switching to offline fallback.")
+            self._speak_offline(text)
+
+    def _speak_offline(self, text: str):
+        """
+        Fallback to pyttsx3 (Robot voice)
+        """
         if self.engine:
             try:
                 self.engine.say(text)
                 self.engine.runAndWait()
             except Exception as e:
-                print(f"[TTS Runtime Error]: {e}")
-                self._fallback_speak(text)
+                print(f"[TTS] pyttsx3 error: {e}")
+                self._fallback_espeak(text)
         else:
-            self._fallback_speak(text)
+            self._fallback_espeak(text)
 
-    def _fallback_speak(self, text: str):
+    def _fallback_espeak(self, text: str):
         """
-        Fallback mechanism using direct subprocess call to espeak.
-        Useful for Docker environments where pyttsx3 drivers might flake out.
+        Direct shell call to espeak if Python bindings fail.
         """
         try:
-            subprocess.run(
-                ['espeak', '-s', '150', '-v', 'en-us', text], 
-                capture_output=True, 
-                check=True
-            )
+            subprocess.run(['espeak', '-s', '125', '-v', 'en-us', text], check=True)
         except Exception as e:
-            print(f"[TTS Fallback Error]: espeak failed: {e}")
+            print(f"[TTS] espeak command failed: {e}")
 
-# Create a singleton instance for easy import if needed, 
-# though instantiating in main.py is cleaner.
 if __name__ == "__main__":
+    # This block runs when you execute: python -m jetvoice.tts.tts
+    
+    print("--- Initializing JetVoiceTTS ---")
     tts = JetVoiceTTS()
-    tts.speak("System initialized.")
+    
+    # Long sentence to test naturalness/robotics
+    long_text = (
+        "Hello there! I am testing my voice capabilities. "
+        "This is a longer sentence designed to check if I sound like a "
+        "friendly assistant, or if I still sound a bit too much like a "
+        "robot from the nineteen eighties. I hope the audio is clear!"
+    )
+    
+    tts.speak(long_text)

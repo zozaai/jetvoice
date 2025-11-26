@@ -12,6 +12,7 @@ RUN apt-get update && apt-get install -y \
     espeak \
     libespeak1 \
     alsa-utils \
+    mpg123 \
     && rm -rf /var/lib/apt/lists/*
 
 # Set workdir
