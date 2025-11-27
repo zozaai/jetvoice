@@ -8,11 +8,12 @@ from loguru import logger
 from jetvoice.vad.vad import WebRTCVAD
 from jetvoice.stt.stt import transcribe_bytes
 from jetvoice.llm.llm import JetVoiceLLM
+from jetvoice.tts.tts import JetVoiceTTS
 
 
 def main():
     """
-    Main loop: VAD -> STT -> LLM -> Loop
+    Main loop: VAD -> STT -> LLM -> TTS -> Loop
     """
 
     # ------- Logging -------
@@ -25,7 +26,7 @@ def main():
                "<level>{message}</level>"
     )
 
-    logger.info("Starting JetVoice VAD + STT + LLM loop...")
+    logger.info("Starting JetVoice VAD + STT + LLM + TTS loop...")
 
     # ------- Config -------
     sample_rate = int(os.getenv("SAMPLE_RATE", "16000"))
@@ -40,7 +41,7 @@ def main():
         f"aggressiveness={aggressiveness}, n_streak={n_streak}, n_silence={n_silence}"
     )
 
-    # ------- VAD & LLM Init -------
+    # ------- Init Modules -------
     vad = WebRTCVAD(
         sample_rate=sample_rate,
         frame_duration_ms=frame_duration_ms,
@@ -48,6 +49,7 @@ def main():
     )
     
     llm = JetVoiceLLM()
+    tts = JetVoiceTTS()
 
     audio_device = int(os.getenv("AUDIO_DEVICE", "0"))
     audio_queue: "queue.Queue[bytes]" = queue.Queue()
@@ -71,6 +73,7 @@ def main():
     logger.info("[STATE] listening (no voice, waiting for activity)")
 
     try:
+        # We assign the stream to a variable 'stream' so we can stop/start it
         with sd.RawInputStream(
             samplerate=sample_rate,
             blocksize=blocksize,
@@ -78,7 +81,7 @@ def main():
             channels=1,
             callback=audio_callback,
             device=audio_device,
-        ):
+        ) as stream:
             while True:
                 chunk = audio_queue.get()
                 buffer += chunk
@@ -121,15 +124,33 @@ def main():
                                 if audio_bytes:
                                     text = transcribe_bytes(audio_bytes, sample_rate=sample_rate)
                                     if text:
-                                        # Removed trailing \n
                                         print(f"\n[Transcript] {text}")
                                         
                                         logger.info("Querying LLM...")
                                         response = llm.ask(text)
                                         
                                         if response:
-                                            # Removed leading and trailing \n
                                             print(f"[AI] {response}")
+                                            
+                                            # --- TTS BLOCKING SECTION ---
+                                            logger.info("Pausing microphone for playback...")
+                                            
+                                            # 1. Stop capturing to prevent feedback loop
+                                            stream.stop()
+                                            
+                                            # 2. Speak the response (Blocking)
+                                            tts.speak(response)
+                                            
+                                            # 3. Clear any audio buffered during the stop process
+                                            #    (This prevents processing 'echoes' captured just before stopping)
+                                            with audio_queue.mutex:
+                                                audio_queue.queue.clear()
+                                            buffer = b""
+                                            
+                                            # 4. Resume capturing
+                                            logger.info("Resuming listening...")
+                                            stream.start()
+                                            
                                         else:
                                             logger.warning("LLM returned no response.")
                                     else:
